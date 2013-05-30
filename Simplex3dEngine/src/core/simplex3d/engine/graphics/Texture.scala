@@ -32,41 +32,39 @@ import simplex3d.data.double._
 import simplex3d.engine.util._
 
 
-trait Concrete
-
 abstract class Texture[A <: Accessor] private[engine] (
   @transient protected val accessible: ReadData[A] with DirectSrc with ContiguousSrc,
   protected val linked: DirectSrc with ContiguousSrc
 )
 extends EngineInfoRef {
-  
+
   type Accessor = A with simplex3d.data.Accessor
-  
+
   def bindingDimensions: AnyVec[Int]//XXX possibly simplify to dimensions?
-  
+
   protected var dataChanges = true
-    
+
   private[engine] def hasDataChanges = dataChanges
   private[engine] def clearDataChanges() { dataChanges = false }
-  
-  
+
+
   {
     var count = 0
     if (accessible != null) count += 1
     if (linked != null) count += 1
-    
+
     if (count != 1) throw new IllegalArgumentException("Data source must not be null.")
   }
 
-  
+
   def isAccessible = (accessible != null)
   def isWritable = (isAccessible && !accessible.isReadOnly)
-  
+
   def read: ReadData[A] with DirectSrc with ContiguousSrc = {
     if (isAccessible) accessible.asReadOnly().asInstanceOf[ReadData[A] with DirectSrc with ContiguousSrc]
     else throw new IllegalAccessException("Texture data is not accessible.")
   }
-  
+
   def write: Data[A] with DirectSrc with ContiguousSrc = {
     if (isWritable) {
       dataChanges = true
@@ -74,31 +72,31 @@ extends EngineInfoRef {
     }
     else throw new IllegalAccessException("Texture data is not writable.")
   }
-  
+
   def src: DirectSrc with ContiguousSrc = if (isAccessible) accessible else linked
-  
-  
+
+
   // *** Parameters ***************************************************************************************************
   protected var parameterChanges = true
   private[engine] def hasParameterChanges = parameterChanges//XXX bridge via AnyVal proxy
   private[engine] def clearParameterChanges() { parameterChanges = false }//XXX bridge via AnyVal proxy
-  
+
   private var _magFilter: ImageFilter.Value = ImageFilter.Linear
   def magFilter = _magFilter
   def magFilter_=(filter: ImageFilter.Value) { parameterChanges = true; _magFilter = filter }
-  
+
   private var _minFilter: ImageFilter.Value = ImageFilter.Linear
   def minFilter = _minFilter
   def minFilter_=(filter: ImageFilter.Value) { parameterChanges = true; _minFilter = filter }
-  
+
   private var _mipMapFilter: MipMapFilter.Value = MipMapFilter.Linear
   def mipMapFilter = _mipMapFilter
   def mipMapFilter_=(filter: MipMapFilter.Value) { parameterChanges = true; _mipMapFilter = filter }
-  
+
   private var _anisotropyLevel: Double = 4
   def anisotropyLevel = _anisotropyLevel
   def anisotropyLevel_=(level: Double) { parameterChanges = true; _anisotropyLevel = max(1, level) }
-  
+
   private val _borderColor = Vec4(0)
   def borderColor: ReadVec4 = _borderColor
   def borderColor_=(color: inVec4) { parameterChanges = true; _borderColor := color }
@@ -124,7 +122,7 @@ class Texture2d[A <: Accessor] private (
 )
 extends Texture[A](accessible, linked) with Concrete
 {
-  
+
   if (accessible != null) {
     if (dimensions.x < 0 || dimensions.x < 0) throw new IllegalArgumentException(
       "Dimensions = " + dimensions + " contain negative components."
@@ -133,43 +131,43 @@ extends Texture[A](accessible, linked) with Concrete
       "Texture dimensions do not match data size."
     )
   }
-  
-  
+
+
   final def bindingDimensions = dimensions
-  
-  
+
+
   /** Fill the texture with pixels obtained from the function.
-   * 
+   *
    * @param function (dimensions, pixelCoordinates) => pixelValue
    */
   def fillWith(function: inVec2 => A#Read) :this.type = {
     val data = this.write
-    
+
     var y = 0; while (y < dimensions.y) {
       renderLine(data, function, y)
-      
+
       y += 1
     }
-    
+
     this
   }
   private[this] final def renderLine = (data: Data[A], function: inVec2 => A#Read, y: Int) => {
     val pixel = Vec2(0, y)
 
     var x = 0; while (x < dimensions.x) { val i = x + y*dimensions.x
-      
+
       pixel.x = x
       data(i) = function(pixel)
-      
+
       x += 1
     }
   }
-  
-  
+
+
   private var _wrapS: TextureWrap.Value = TextureWrap.Repeat
   def wrapS = _wrapS
   def wrapS_=(wrapValue: TextureWrap.Value) { parameterChanges = true; _wrapS = wrapValue }
-  
+
   private var _wrapT: TextureWrap.Value = TextureWrap.Repeat
   def wrapT = _wrapT
   def wrapT_=(wrapValue: TextureWrap.Value) { parameterChanges = true; _wrapT = wrapValue }
@@ -178,7 +176,7 @@ extends Texture[A](accessible, linked) with Concrete
 
 object Texture2d {
   val Tag = classTag[Texture2d[_]]
-  
+
   def apply[F <: Format { type Component = RDouble; type Accessor <: simplex3d.data.Accessor }](
     dimensions: ConstVec2i
   )(implicit
@@ -190,7 +188,7 @@ object Texture2d {
     val data = composition.mkDataBuffer(primitive.mkDataBuffer(dimensions.x*dimensions.y*composition.components))
     new Texture2d[F#Accessor](dimensions, data, null)
   }
-  
+
   def fromData[A <: Accessor](
     dimensions: ConstVec2i, data: ReadData[A] with DirectSrc with ContiguousSrc
   )
@@ -201,15 +199,106 @@ object Texture2d {
   def fromUncheckedSrc[A <: Accessor](
     dimensions: ConstVec2i, src: DirectSrc with ContiguousSrc
   )(implicit accessorTag: ClassTag[A]) :Texture2d[A] = {
-    
+
     if (src.accessorTag != accessorTag) throw new IllegalArgumentException(
       "Data accessor type doest not match the tag.")
-    
+
     if (src.isInstanceOf[Data[_]]) {
       fromData(dimensions, src.asInstanceOf[Data[A] with DirectSrc with ContiguousSrc])
     }
     else {
       new Texture2d(dimensions, null, src)
+    }
+  }
+}
+
+
+
+class DepthTexture2d[A <: Accessor] (
+  dimensions: ConstVec2i,
+  accessible: ReadData[A] with DirectSrc with ContiguousSrc,
+  linked: DirectSrc with ContiguousSrc
+) extends Texture2d (dimensions, accessible, linked)
+
+object DepthTexture2d {
+  val Tag = classTag[DepthTexture2d[_]]
+
+  def apply[F <: Format { type Component = RDouble; type Accessor <: simplex3d.data.Accessor }](
+    dimensions: ConstVec2i
+  )(implicit
+    composition: CompositionFactory[F, _ >: UByte]
+  )
+  :DepthTexture2d[F#Accessor] =
+  {
+    val primitive = implicitly[PrimitiveFactory[RDouble, UByte]]
+    val data = composition.mkDataBuffer(primitive.mkDataBuffer(dimensions.x*dimensions.y*composition.components))
+    new DepthTexture2d[F#Accessor](dimensions, data, null)
+  }
+
+  def fromData[A <: Accessor](
+    dimensions: ConstVec2i, data: ReadData[A] with DirectSrc with ContiguousSrc
+  )
+  :DepthTexture2d[A] = {
+    new DepthTexture2d(dimensions, data, null)
+  }
+
+  def fromUncheckedSrc[A <: Accessor](
+    dimensions: ConstVec2i, src: DirectSrc with ContiguousSrc
+  )(implicit accessorTag: ClassTag[A]) :Texture2d[A] = {
+
+    if (src.accessorTag != accessorTag) throw new IllegalArgumentException(
+      "Data accessor type doest not match the tag.")
+
+    if (src.isInstanceOf[Data[_]]) {
+      fromData(dimensions, src.asInstanceOf[Data[A] with DirectSrc with ContiguousSrc])
+    }
+    else {
+      new DepthTexture2d(dimensions, null, src)
+    }
+  }
+}
+
+
+class F16Texture2d[A <: Accessor] (
+  dimensions: ConstVec2i,
+  accessible: ReadData[A] with DirectSrc with ContiguousSrc,
+  linked: DirectSrc with ContiguousSrc
+) extends Texture2d (dimensions, accessible, linked)
+
+object F16Texture2d {
+  val Tag = classTag[F16Texture2d[_]]
+
+  def apply[F <: Format { type Component = RDouble; type Accessor <: simplex3d.data.Accessor }](
+    dimensions: ConstVec2i
+  )(implicit
+    composition: CompositionFactory[F, _ >: UByte]
+  )
+  :F16Texture2d[F#Accessor] =
+  {
+    val primitive = implicitly[PrimitiveFactory[RDouble, UByte]]
+    val data = composition.mkDataBuffer(primitive.mkDataBuffer(dimensions.x*dimensions.y*composition.components))
+    new F16Texture2d[F#Accessor](dimensions, data, null)
+  }
+
+  def fromData[A <: Accessor](
+    dimensions: ConstVec2i, data: ReadData[A] with DirectSrc with ContiguousSrc
+  )
+  :F16Texture2d[A] = {
+    new F16Texture2d(dimensions, data, null)
+  }
+
+  def fromUncheckedSrc[A <: Accessor](
+    dimensions: ConstVec2i, src: DirectSrc with ContiguousSrc
+  )(implicit accessorTag: ClassTag[A]) :Texture2d[A] = {
+
+    if (src.accessorTag != accessorTag) throw new IllegalArgumentException(
+      "Data accessor type doest not match the tag.")
+
+    if (src.isInstanceOf[Data[_]]) {
+      fromData(dimensions, src.asInstanceOf[Data[A] with DirectSrc with ContiguousSrc])
+    }
+    else {
+      new F16Texture2d(dimensions, null, src)
     }
   }
 }

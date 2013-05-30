@@ -33,10 +33,10 @@ import simplex3d.engine.graphics.prototype._
 
 
 abstract class FullscreenEffect(name: String) extends Scene[GraphicsContext](name) { effect =>
-  
+
   protected val fragmentShader: String
-  
-  private val vertexShader = new Shader(Shader.Vertex,
+
+  protected val vertexShader = new Shader(Shader.Vertex,
     """
     attribute vec3 vertices;
     void main() {
@@ -44,34 +44,41 @@ abstract class FullscreenEffect(name: String) extends Scene[GraphicsContext](nam
     }
     """
   )
-  
+
   private val renderArray = new SortBuffer[AbstractMesh](1)
-  
-  
-  private def mkMesh() = new BaseMesh(effect.name + " Canvas") { self =>
-    
-    geometry.vertices := Attributes.fromData(DataBuffer[Vec3, RFloat](
-      Vec3(-1, -1, 0), Vec3(1, 1, 0), Vec3(-1, 1, 0),
-      Vec3(-1, -1, 0), Vec3(1, -1, 0), Vec3(1, 1, 0)
-    ))
-    
-    {
-      val (names, props) = JavaReflection.valueMap(
-        effect, classOf[Value[_ <: Binding]], JavaReflection.BindingFilter, Nil)
-        
-      val shaderUniforms = Map((names zip props): _*).asInstanceOf[Map[String, Value[UncheckedBinding]]]
-      val fs = new Shader(Shader.Fragment, fragmentShader, shaderUniforms)
-      this.technique := new Technique(MinimalGraphicsContext, Set(vertexShader, fs))//XXX implicit doesnt work. why?
-    }
+
+  protected def prepMesh (mesh : BaseMesh) {
+
   }
-  
-  
+
+  private def mkMesh() = {
+      val mesh = new BaseMesh(effect.name + " Canvas") { self =>
+
+      geometry.vertices := Attributes.fromData(DataBuffer[Vec3, RFloat](
+        Vec3(-1, -1, 0), Vec3(1, 1, 0), Vec3(-1, 1, 0),
+        Vec3(-1, -1, 0), Vec3(1, -1, 0), Vec3(1, 1, 0)
+      ))
+
+      {
+        val (names, props) = JavaReflection.valueMap(
+          effect, classOf[Value[_ <: Binding]], JavaReflection.BindingFilter, Nil)
+
+        val shaderUniforms = Map((names zip props): _*).asInstanceOf[Map[String, Value[UncheckedBinding]]]
+        val fs = new Shader(Shader.Fragment, fragmentShader, shaderUniforms)
+        this.technique := new Technique(MinimalGraphicsContext, Set(vertexShader, fs))//XXX implicit doesnt work. why?
+      }
+    }
+    prepMesh(mesh)
+    mesh
+  }
+
+
   protected def render(renderManager: RenderManager, time: TimeStamp) {
     if (renderArray.isEmpty) renderArray += mkMesh()
-    
+
     renderManager.render(time, IdentityCamera, renderArray)
   }
-  
+
   protected def preload(context: RenderContext, frameTimer: FrameTimer, timeSlice: Double) :Double = 1.0
   protected def update(time: TimeStamp) {}
   protected def manage(context: RenderContext, frameTimer: FrameTimer, timeSlice: Double) {}

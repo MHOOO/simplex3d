@@ -27,16 +27,20 @@ import simplex3d.engine.graphics._
 
 trait RenderContext {
   val capabilities: GraphicsCapabilities
-  
+
   def init(attributes: Attributes[_, _])
   def release(attributes: Attributes[_, _])
-  
+
   def init(texture: Texture[_]) :Unit
   def release(texture: Texture[_]) :Unit
-  
+
+  def init(fbo: FrameBuffer) :Unit
+  def release(fbo: FrameBuffer) :Unit
+  def bindFrameBuffer(fbo: FrameBuffer) :Unit
+  def unbindFrameBuffer(fbo: FrameBuffer) :Unit
   def clearFrameBuffer() :Unit
   def viewportDimensions() :ConstVec2i
-  
+
   def manage() :Unit
   def cleanup() :Unit
 }

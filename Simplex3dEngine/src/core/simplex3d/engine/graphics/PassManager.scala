@@ -23,7 +23,10 @@ package graphics
 
 import simplex3d.engine.scene._
 
-
 trait PassManager[G <: GraphicsContext] {
+  var passes : List[Pass]
+
+  // the pass that should be rendered to the default buffer. Default: -1 (last).
+  var finalPass : Integer = -1
   def render(renderManager: RenderManager, time: TimeStamp, scene: ManagedScene[G]) :Unit
 }

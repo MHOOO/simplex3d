@@ -28,21 +28,21 @@ import simplex3d.engine.graphics._
 
 // XXX Redo integration after PassManager, and rename.
 abstract class ManagedScene[G <: GraphicsContext](name: String) extends Scene[G](name) { self =>
-  
+
   private[engine] final def ac_buildRenderArray(pass: Pass, time: TimeStamp, result: SortBuffer[AbstractMesh]) =
     buildRenderArray(pass, time, result)
-  
+
   private[engine] final def ac_camera = camera
-  
-  
+
+
   protected val camera: AbstractCamera
-  protected val techniqueManager: TechniqueManager[G]
-  
+  protected[engine] val techniqueManager: TechniqueManager[G]
+
    /** Update and combine environmental effects while culling.
     */
   protected def buildRenderArray(pass: Pass, time: TimeStamp, result: SortBuffer[AbstractMesh]) :Unit
-  
-  
+
+
   protected def render(renderManager: RenderManager, time: TimeStamp) {
     techniqueManager.passManager.render(renderManager, time, this)
   }

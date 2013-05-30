@@ -28,7 +28,8 @@ class GraphicsCapabilities(
   val maxFragmentUniformComponents: Int,
   val maxAttributes: Int,
   val maxVertexTextures: Int,
-  val maxFragmentTextures: Int
+  val maxFragmentTextures: Int,
+  val supportsFloatTexture: Boolean
 ) {
   override def toString: String = {
     "GraphicsCapabilities(" +
@@ -38,6 +39,7 @@ class GraphicsCapabilities(
       "\n  maxAttributes = " + maxAttributes +
       "\n  maxVertexTextures = " + maxVertexTextures +
       "\n  maxFragmentTextures = " + maxFragmentTextures +
+      "\n  supportsFloatTexture = " + supportsFloatTexture +
     "\n)"
   }
 }

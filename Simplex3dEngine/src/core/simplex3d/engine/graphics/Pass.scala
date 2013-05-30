@@ -22,11 +22,50 @@ package simplex3d.engine
 package graphics
 
 import simplex3d.engine.scene._
+import simplex3d.engine.graphics.pluggable._
+import simplex3d.engine.transformation._
+import simplex3d.scenegraph._
+
+import simplex3d.math.types._
+import simplex3d.math._
+import simplex3d.math.double._
+import simplex3d.math.double.functions._
+import simplex3d.data._
+import simplex3d.data.double._
+import simplex3d.engine.util._
+import simplex3d.engine.graphics.prototype._
 
 
-class Pass(
-  val frameBuffer: FrameBuffer,
-  val camera: Option[AbstractCamera]= None,
-  val technique: Option[Technique] = None,
-  val triggers: List[String] = Nil // TODO design and implement triggers
-)
+
+// class PassInput () {
+//     def receive (value : ???) {
+
+//     }
+// }
+
+// class PassOutput () {
+//     private val connections: List [PassInput] = List.empty
+//     def connectTo (input: PassInput) {
+//         connections ++= input
+//     }
+// }
+
+// TODO: frameBuffer should default to the screen size?
+class Pass (
+    val frameBuffer: FrameBuffer,
+    var camera: Option[AbstractCamera]= None,
+    val technique: Option[Technique] = None,
+    val triggers: List[String] = Nil // TODO design and implement triggers
+        //val inputs: List [PassInput] = List.empty,
+        //val outputs: List [PassOutput] = List.empty
+) {
+    var meshFilter : Option[AbstractMesh => Boolean] = None
+    var clearBuffer = true
+    var mesh : Option [AbstractMesh] = None
+    var scene : Option [ManagedScene[_ <: graphics.GraphicsContext]] = None
+
+    def preRender(time : TimeStamp) {
+    }
+    def postRender(time : TimeStamp) {
+    }
+}

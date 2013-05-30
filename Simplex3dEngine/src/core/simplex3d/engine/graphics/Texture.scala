@@ -32,6 +32,8 @@ import simplex3d.data.double._
 import simplex3d.engine.util._
 
 
+trait Concrete
+
 abstract class Texture[A <: Accessor] private[engine] (
   @transient protected val accessible: ReadData[A] with DirectSrc with ContiguousSrc,
   protected val linked: DirectSrc with ContiguousSrc

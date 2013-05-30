@@ -41,49 +41,54 @@ class SceneGraph[T <: TransformationContext, G <: GraphicsContext](
   final val techniqueManager: TechniqueManager[G]
 )(implicit transformationContext: T)
 extends ManagedScene[G](name) {
-  
+
   private[this] val controllerManager = new ControllerManager(settings.multithreadedControllers)
-  
+
   protected val _root = new EnvrionmentNode("Root")(transformationContext, techniqueManager.graphicsContext)
   protected def root: EnvrionmentNode[T, G] = _root
   root.controllerManager = controllerManager
   root.customBoundingVolume := new Aabb(Vec3(Double.MinValue), Vec3(Double.MaxValue))
   root.appendChild(camera)
-  
-  
+
+
   def attach(elem: SceneElement[T, G]) {
     root.appendChild(elem)
   }
   def detach(elem: SceneElement[T, G]) :Boolean = {
     root.removeNestedChild(elem)
   }
-  
+
   def environment = root.environment
-  
-  
+
+
   protected def preload(context: RenderContext, frameTimer: FrameTimer, timeSlice: Double) :Double = {
     // TODO Implement two preloading modes: preload everything, and preload extended visual range.
     // TODO Add a loading screen with an image and a progress bar, integrate it with the Scenegraph.
     1.0
   }
-  
+
   protected def update(time: TimeStamp) {
     controllerManager.update(time)
   }
-  
-  
+
+
   private val batchArray = new SortBuffer[SceneElement[T, G]](100)
   private val concurrentArray = new ConcurrentSortBuffer[SceneElement[T, G]](100)
-  
+
   protected def buildRenderArray(pass: Pass, time: TimeStamp, result: SortBuffer[AbstractMesh]) {
+    // FIXME: why is this check here, when PassManager uses
+    // renderManager.render with the scene camera instead of the pass
+    // camera?
     val camera = if (pass.camera.isDefined) pass.camera.get else this.camera
-    
+    var meshFilter = { _ : AbstractMesh => true }
+    pass.meshFilter map { meshFilter = _ }
+
     val frustum = Frustum(camera.viewProjection)
     val view = new View(pass.frameBuffer.dimensions, camera, frustum) //XXX proper dimensions
-    
+
     val allowMultithreading = settings.multithreadedParsing
     if (allowMultithreading) batchArray.clear()
-    
+
     val cullContext = new CullContext(
       result.asInstanceOf[SortBuffer[SceneElement[T, G]]],
       time, view,
@@ -91,58 +96,58 @@ extends ManagedScene[G](name) {
       batchArray
     )
     root.cull(true, true, allowMultithreading, 0, cullContext)
-    
+
     if (allowMultithreading) {
       concurrentArray.clear()
-      
+
       val cullContext = new CullContext(
         concurrentArray,
         time, view,
         settings.multithreadedParsing_NodesWithChildren, settings.multithreadedParsing_FromDepth,
         null
       )
-      
+
       (0 until batchArray.size).par.foreach { i =>
         batchArray(i) match {
           case b: Bounded[_, _] => b.cull(true, true, false, 0, cullContext)
           case _ => // do nothing.
         }
       }
-      
+
       result ++= concurrentArray.asInstanceOf[SortBuffer[AbstractMesh]]
     }
-    
-    
+
+
     // XXX Take this out of the SceneGraph, and stuff it into the RenderManager,
     // this will allow to drop dependency on the TechniqueManager
     // Resolve techniques.
     val size = result.size
     var i = 0; while (i < size) { val mesh = result(i).asInstanceOf[Mesh[T, G]]
-      
+
       if (mesh.hasStructuralChanges) {
         val technique = techniqueManager.resolveTechnique(
           mesh.name, mesh.shaderDebugging, mesh.geometry, mesh.material, mesh.worldEnvironment)
-          
+
         if (technique != null) mesh.technique := technique else mesh.technique.undefine()
-        
+
         mesh.geometry.clearStructuralChanges()
         mesh.material.clearStructuralChanges()
       }
-      
+
       i += 1
     }
-    
+
     i = 0; while (i < size) { val mesh = result(i)
       mesh.worldEnvironment.clearStructuralChanges()
-      
+
       i += 1
     }
   }
-  
+
   protected def manage(context: RenderContext, frameTimer: FrameTimer, timeSlice: Double) {
     // TODO add gradual texture and VBO loading for off-screen objects.
   }
-  
+
   protected def cleanup(context: RenderContext) {
     //XXX implement
   }

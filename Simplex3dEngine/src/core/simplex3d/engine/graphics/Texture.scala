@@ -117,7 +117,7 @@ object TextureWrap extends Enumeration {
 }
 
 
-class Texture2d[A <: Accessor] private (
+class Texture2d[A <: Accessor] (
   final val dimensions: ConstVec2i,
   accessible: ReadData[A] with DirectSrc with ContiguousSrc,
   linked: DirectSrc with ContiguousSrc

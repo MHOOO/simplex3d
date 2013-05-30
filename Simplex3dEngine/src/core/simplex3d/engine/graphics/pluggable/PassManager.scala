@@ -33,7 +33,6 @@ import simplex3d.engine.graphics._
 
 
 import simplex3d.engine.scene.api._ // use this to get access to protected methods on, say, ManagedScene
-import simplex3d.backend.lwjgl.RDepth
 
 class PassManager[G <: graphics.GraphicsContext] extends graphics.PassManager[G] {
 

@@ -24,7 +24,6 @@ package graphics
 import simplex3d.engine.scene._
 import simplex3d.engine.graphics.pluggable._
 import simplex3d.engine.transformation._
-import simplex3d.scenegraph._
 
 import simplex3d.math.types._
 import simplex3d.math._

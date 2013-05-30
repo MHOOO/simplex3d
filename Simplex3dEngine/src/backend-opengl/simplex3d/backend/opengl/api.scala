@@ -28,7 +28,7 @@ import simplex3d.engine.util.EngineInfoRef._
 
 
 object api {
-  
+
   implicit final def engineInfo(attributes: Attributes[_, _]) :ObjectInfo = {
     var data = getEngineInfo(attributes.sharedState).asInstanceOf[ObjectInfo]
     if (data == null) {
@@ -37,7 +37,7 @@ object api {
     }
     data
   }
-  
+
   implicit final def engineInfo(texture: Texture[_]) :TextureInfo = {
     var data = getEngineInfo(texture).asInstanceOf[TextureInfo]
     if (data == null) {
@@ -46,7 +46,16 @@ object api {
     }
     data
   }
-  
+
+  implicit final def engineInfo(fbo: FrameBuffer) :FrameBufferInfo = {
+    var data = getEngineInfo(fbo).asInstanceOf[FrameBufferInfo]
+    if (data == null) {
+      data = new FrameBufferInfo
+      setEngineInfo(fbo, data)
+    }
+    data
+  }
+
   implicit final def engineInfo(shader: Shader) :CompiledInfo = {
     var data = getEngineInfo(shader).asInstanceOf[CompiledInfo]
     if (data == null) {
@@ -55,7 +64,7 @@ object api {
     }
     data
   }
-  
+
   implicit final def engineInfo(program: Technique) :ProgramInfo = {
     var data = getEngineInfo(program).asInstanceOf[ProgramInfo]
     if (data == null) {
@@ -64,7 +73,7 @@ object api {
     }
     data
   }
-  
+
   implicit final def engineInfo(mesh: AbstractMesh) :MeshInfo = {
     var data = getEngineInfo(mesh).asInstanceOf[MeshInfo]
     if (data == null) {
@@ -77,23 +86,26 @@ object api {
 
 
 object unsafe {
-  
+
   implicit final def engineInfo(attributes: Attributes[_, _]) :ObjectInfo = {
     getEngineInfo(attributes.sharedState).asInstanceOf[ObjectInfo]
   }
-  
+
   implicit final def engineInfo(texture: Texture[_]) :TextureInfo = {
     getEngineInfo(texture).asInstanceOf[TextureInfo]
   }
-  
+
+  implicit final def engineInfo(fbo: FrameBuffer) :FrameBufferInfo = {
+    getEngineInfo(fbo).asInstanceOf[FrameBufferInfo]
+  }
   implicit final def engineInfo(shader: Shader) :CompiledInfo = {
     getEngineInfo(shader).asInstanceOf[CompiledInfo]
   }
-  
+
   implicit final def engineInfo(program: Technique) :ProgramInfo = {
     getEngineInfo(program).asInstanceOf[ProgramInfo]
   }
-  
+
   implicit final def engineInfo(mesh: AbstractMesh) :MeshInfo = {
     getEngineInfo(mesh).asInstanceOf[MeshInfo]
   }

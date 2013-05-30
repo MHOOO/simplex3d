@@ -1,5 +1,5 @@
 /*
- * Simplex3dEngine - LWJGL Module
+ * Simplex3dengine - LWJGL Module
  * Copyright (C) 2011, Aleksey Nikiforov
  *
  * This file is part of Simplex3dEngine.
@@ -43,6 +43,20 @@ import simplex3d.backend.opengl._
 import simplex3d.backend.opengl.api._
 
 
+sealed trait RDepth extends simplex3d.math.integration.Accessor
+{
+  type Read = Float
+  type Const = Read
+
+  type Accessor = RFloat
+  type Component = RFloat
+
+  type Array = scala.Array[Float]
+  type Buffer = java.nio.FloatBuffer
+}
+
+
+
 private[lwjgl] class ActiveAttributeId(var id: Int)
 private[lwjgl] class ActiveTextureId(var unit: Int, var id: Int)
 
@@ -56,79 +70,81 @@ private[lwjgl] final class RenderContext(val capabilities: GraphicsCapabilities,
 extends graphics.RenderContext {
   import GL11._; import GL12._; import GL13._; import GL14._; import GL15._
   import GL20._; import EXTTextureFilterAnisotropic._; import EXTFramebufferObject._
+  import ARBTextureFloat._
   import RenderContext.logger._
-  
+
 
   private val defaultTexture2d = {
     val dims = ConstVec2i(4)
     val data = DataBuffer[Vec3, UByte](dims.x*dims.y)
-    
+
     for (y <- 0 until dims.y; x <- 0 until dims.x) {
       data(x + y*dims.x) = Vec3(1, 0, 1)
     }
-    
+
     val binding = new TextureBinding[Texture2d[_]]
     binding := Texture2d.fromData(dims, data.asReadOnly())
     binding
   }
-  
+
   val defaultProgram = {
     val vertexShader = """
       uniform mat4 se_modelViewProjectionMatrix;
       attribute vec3 vertices;
-      
+
       void main() {
         gl_Position = se_modelViewProjectionMatrix*vec4(vertices, 1.0);
       }
     """
-    
+
     val fragmentShader = """
       void main() {
         gl_FragColor = vec4(1.0, 0.0, 1.0, 1.0);
       }
     """
-    
+
     val shaders = Set[Shader](
       new Shader(Shader.Vertex, vertexShader),
       new Shader(Shader.Fragment, fragmentShader)
     )
-    
+
     new Technique(MinimalGraphicsContext, shaders)
   }
-  
-  
+
+
   private val resourceManager = new GlResourceManager(
     attributeManager = new IdManager(100)(glGenBuffers(_), glDeleteBuffers(_)),
     textureManager = new IdManager(20)(glGenTextures(_), glDeleteTextures(_)),
+    EXTFramebufferObject.glDeleteFramebuffersEXT(_),
     glDeleteShader(_),
     glDeleteProgram(_)
   )
-  
+
   val predefinedUniforms = new PredefinedUniforms
-  
-  
+
+
   // ******************************************************************************************************************
-  
+
   private var invalidateState = false
 
   private var faceCullingState: Int = 0
   private var mipmapHintEnabled = false
-  
+
   private final var activeProgramId = 0
   private final var boundBufferId = 0
   private final var boundIndexId = 0
-  
+
   private final var activeTextureUnit = 0
-  
+
   private final def textureUnits = new Array[Int](32)
   private final def boundTexture = textureUnits(activeTextureUnit)
   private final def boundTexture_=(id: Int) { textureUnits(activeTextureUnit) = id }
-  
+
   private final val activeAttributes = new HashMap[Int, ActiveAttributeId] //XXX possibly use different data structures
   private final val activeTextures = new HashMap[Int, ActiveTextureId]
-  
+
   final def requiresReset = invalidateState
-  
+
   final def setFaceCulling(faceCulling: FaceCulling.type#Value) {
     val resolved = {
       faceCulling match {
@@ -137,7 +153,7 @@ extends graphics.RenderContext {
         case FaceCulling.Back => GL_BACK
       }
     }
-    
+
     if (resolved != faceCullingState) {
       if (resolved > 0) {
         if (faceCullingState <= 0) glEnable(GL_CULL_FACE)
@@ -147,87 +163,87 @@ extends graphics.RenderContext {
       faceCullingState = resolved
     }
   }
-  
+
   final def mipmapHint() {
     if (!mipmapHintEnabled) { glHint(GL_GENERATE_MIPMAP_HINT, GL_NICEST); mipmapHintEnabled = true }
   }
-  
+
   final def useProgram(id: Int) {
     if (activeProgramId != id) {
       glUseProgram(id)
       activeProgramId = id
     }
   }
-  
+
   final def bindBuffer(id: Int) {
     if (boundBufferId != id) {
       glBindBuffer(GL_ARRAY_BUFFER, id)
       boundBufferId = id
     }
   }
-  
+
   final def bindIndex(id: Int) {
     if (boundIndexId != id) {
       glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, id)
       boundIndexId = id
     }
   }
-  
+
   final def activeTextureUnit(textureUnit: Int) {
     if (activeTextureUnit != textureUnit) {
       glActiveTexture(GL_TEXTURE0 + textureUnit)
       activeTextureUnit = textureUnit
     }
   }
-  
+
   final def bindTexture(glTarget: Int, id: Int) {
     if (boundTexture != id) {
       glBindTexture(glTarget, id)
       boundTexture = id
     }
   }
-  
+
   final def resetState() {
     faceCullingState = -1
-  
+
     mipmapHintEnabled = false
-    
+
     activeProgramId = 0
     boundBufferId = 0
     boundIndexId = 0
-    
+
     activeTextureUnit = -1
-    
+
     var i = 0; while (i < textureUnits.length) {
       textureUnits(i) = 0
       i += 1
     }
-    
+
     activeAttributes.clear()
     activeTextures.clear()
-    
+
     invalidateState = false
   }
-  
-  
+
+
   // ******************************************************************************************************************
-  
+
   def init(attributes: Attributes[_, _]) {
     initUpdateAttributes(attributes)
   }
-  
+
   private def initUpdateAttributes(attributes: Attributes[_, _]) :Int = {
     var id = attributes.managedFields.id
     if (id == 0) id = initialize(attributes)
     else if (attributes.sharedState.hasDataChanges) update(id, attributes)
-    
+
     id
   }
-  
+
   private def initialize(attributes: Attributes[_, _]) :Int = {
     resourceManager.allocate(attributes)
     val id = attributes.managedFields.id
-      
+
     bindBuffer(id)
     glBufferData(
       GL_ARRAY_BUFFER,
@@ -238,92 +254,110 @@ extends graphics.RenderContext {
         case Caching.Stream => GL_STREAM_DRAW
       }
     )
-    
+
     attributes.sharedState.clearDataChanges()
     id
   }
-  
+
   private def update(id: Int, attributes: Attributes[_, _]) {
     val data = attributes.asInstanceOf[Attributes[_ <: Format, Raw]].read
-    
+
     bindBuffer(id)
-    
+
     val regions = attributes.sharedState.updatedRegions
     regions.merge()
-    
+
     var i = 0; while (i < regions.size) {
-      
+
       val first = regions.first(i)
       val count = regions.count(i)
-      
+
       glBufferSubData(
         GL_ARRAY_BUFFER,
         first*data.byteStride,
         data.bindingBufferSubData(first, count)
       )
-      
+
       i += 1
     }
-    
+
     attributes.sharedState.clearDataChanges()
   }
-  
+
   def bind(location: Int, columns: Int, rows: Int, attributes: Attributes[_ <: Format, Raw]) {
     val id = initUpdateAttributes(attributes)
-    
+
     val src = attributes.src
     bindBuffer(id)
-    
+
     def bindColumn(location: Int, column: Int) {
       var activeAttribute = activeAttributes.get(location)
       val disabled = (activeAttribute == null)
       if (disabled) {
         activeAttribute = new ActiveAttributeId(0)
         activeAttributes.put(location, activeAttribute)
-        
+
         glEnableVertexAttribArray(location)
       }
-      
+
       if (activeAttribute.id != id) {
         val byteOffset = src.byteOffset + column*src.bytesPerComponent*rows
         glVertexAttribPointer(location, rows, src.rawEnum, src.isNormalized, src.byteStride, byteOffset)
         activeAttribute.id = id
       }
     }
-    
+
     var i = 0; while (i < columns) {
       bindColumn(location + i, i)
-      
+
       i += 1
     }
   }
-  
-  
+
+
   private def initialize(texture: Texture2d[_ <: Accessor]) :Int = {
     resourceManager.allocate(texture)
     val id = texture.managedFields.id
-      
+
     bindTexture(GL_TEXTURE_2D, id)
-    
+
     val generateMipmap = (texture.mipMapFilter != MipMapFilter.Disabled)
-    
+
     val src = texture.src
-    val internalFormat = resolveInternalFormat(src.formatTag)
-    val format = resolveFormat(src.accessorTag)
+    val internalFormat = texture match {
+      case _:DepthTexture2d[_] => GL_DEPTH_COMPONENT
+      case _:F16Texture2d[_] => {
+          src.accessorTag match {
+              case Vec3.Tag => GL_RGB16F_ARB
+              case Vec4.Tag => GL_RGBA16F_ARB
+          }
+      }
+      case other => resolveInternalFormat(src.formatTag)
+    }
+    val format = texture match {
+      case _:DepthTexture2d[_] => GL_DEPTH_COMPONENT
+      case _:F16Texture2d[_] => {
+          src.accessorTag match {
+              case Vec3.Tag => GL_RGB16F_ARB
+              case Vec4.Tag => GL_RGBA16F_ARB
+          }
+      }
+      case other => resolveFormat(src.accessorTag)
+    }
     val ftype = resolveType(src.formatTag, src.rawEnum)
-    
+
     glTexImage2D(
       GL_TEXTURE_2D, 0, //level
       internalFormat, texture.dimensions.x, texture.dimensions.y, 0, //border
       format, ftype, texture.src.bindingBuffer()
     )
-    
+
     if (generateMipmap) { //XXX reuse this chunk of code. also detect ATI drivers and call glEnable(GL_TEXTURE_2D) only for ATI cards.
       glEnable(GL_TEXTURE_2D) // FIX for ATI's glGenerateMipmapEXT() bug.
       glGenerateMipmapEXT(GL_TEXTURE_2D)
       texture.hasMatchingMipmaps = true
     }
-    
+
     if (true) {
       glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT)
       glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT)
@@ -333,38 +367,38 @@ extends graphics.RenderContext {
       glTexParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE)
       glTexParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_WRAP_R, GL_CLAMP_TO_EDGE)
     }
-    
+
     texture.clearDataChanges()
-    
+
     id
   }
-  
+
   private def update(id: Int, texture: Texture2d[_ <: Accessor]) {
     bindTexture(GL_TEXTURE_2D, id)
-    
+
     val generateMipmap = (texture.mipMapFilter != MipMapFilter.Disabled)
-    
+
     val src = texture.src
     val internalFormat = resolveInternalFormat(src.formatTag)
     val format = resolveFormat(src.accessorTag)
     val ftype = resolveType(src.formatTag, src.rawEnum)
-  
+
     glTexSubImage2D(
       GL_TEXTURE_2D, 0, //level
       0, 0, // offset.xy
       texture.dimensions.x, texture.dimensions.y,
       format, ftype, texture.src.bindingBuffer()
     )
-    
+
     if (generateMipmap) {
       glEnable(GL_TEXTURE_2D) // FIX for ATI's glGenerateMipmapEXT() bug.
       glGenerateMipmapEXT(GL_TEXTURE_2D)
       texture.hasMatchingMipmaps = true
     }
-    
+
     texture.clearDataChanges()
   }
-  
+
   private def resolveInternalFormat(tag: ClassTag[_ <: Format]) :Int = {
     tag match {
       case Vec3.Tag => GL_RGB8
@@ -386,7 +420,7 @@ extends graphics.RenderContext {
       case RawEnum.UShort => GL_UNSIGNED_SHORT
     }
   }
-  
+
   private def updateMipmaps(texture: Texture[_]) {
     texture.asInstanceOf[Texture[Accessor]] match {
       case t: Texture2d[_] =>
@@ -395,14 +429,14 @@ extends graphics.RenderContext {
         texture.hasMatchingMipmaps = true
     }
   }
-  
+
   private def updateTextureParameters(glTarget: Int, id: Int, texture: Texture[_]) {
     bindTexture(glTarget, id)
-    
+
     if (texture.mipMapFilter != MipMapFilter.Disabled && !texture.hasMatchingMipmaps) {
       updateMipmaps(texture)
     }
-    
+
     glTexParameteri(
       glTarget, GL_TEXTURE_MAG_FILTER,
       texture.magFilter match {
@@ -410,7 +444,7 @@ extends graphics.RenderContext {
         case ImageFilter.Linear => GL_LINEAR
       }
     )
-    
+
     glTexParameteri(
       glTarget, GL_TEXTURE_MIN_FILTER,
       texture.minFilter match {
@@ -426,16 +460,16 @@ extends graphics.RenderContext {
         }
       }
     )
-    
+
     if (capabilities.maxAnisotropyLevel > 1) glTexParameterf(
       glTarget, GL_TEXTURE_MAX_ANISOTROPY_EXT,
       min(capabilities.maxAnisotropyLevel, texture.anisotropyLevel).toFloat
     )
-    
+
     vec4Data(0) = texture.borderColor
     glTexParameter(glTarget, GL_TEXTURE_BORDER_COLOR, vec4Buffer)
-    
-    
+
+
     def wrapConstant(wrapValue: TextureWrap.Value) :Int = {
       wrapValue match {
         case TextureWrap.ClampToEdge => GL_CLAMP_TO_EDGE
@@ -444,85 +478,85 @@ extends graphics.RenderContext {
         case TextureWrap.Repeat => GL_REPEAT
       }
     }
-    
+
     texture.asInstanceOf[Texture[Accessor]] match {
       case tex: Texture2d[_] =>
         glTexParameteri(glTarget, GL_TEXTURE_WRAP_S, wrapConstant(tex.wrapS))
         glTexParameteri(glTarget, GL_TEXTURE_WRAP_T, wrapConstant(tex.wrapT))
     }
-    
-    
+
+
     texture.clearParameterChanges()
   }
-  
+
 
   def bindTex2d(location: Int, textureUnit: Int, texture: ReadTextureBinding[Texture2d[_]]) {
     if (!texture.isBound) {
       bindTex2d(location, textureUnit, defaultTexture2d)
       return
     }
-    
-    
+
+
     activeTextureUnit(textureUnit)
     val id = initUpdateTexture2d(texture.bound.asInstanceOf[Texture2d[_ <: Accessor]])
-    
+
     var activeTexture = activeTextures.get(location)
     if (activeTexture == null) {
       activeTexture = new ActiveTextureId(activeTextureUnit, 0)
       activeTextures.put(location, activeTexture)
-      
+
       glUniform1i(location, activeTextureUnit)
     }
-    
+
     bindTexture(GL_TEXTURE_2D, id)
     activeTexture.id = id
   }
-  
+
   private def initUpdateTexture2d(texture: Texture2d[_ <: Accessor]) :Int = {
     var id = texture.managedFields.id
     if (id == 0) id = initialize(texture)
     else if (texture.hasDataChanges) update(id, texture)
     if (texture.hasParameterChanges) updateTextureParameters(GL_TEXTURE_2D, id, texture)
-    
+
     id
   }
-  
+
   def init(texture: Texture[_]) {
     activeTextureUnit(0)
-    
+
     texture.asInstanceOf[Texture[Accessor]] match {
       case t: Texture2d[_] => initUpdateTexture2d(t)
     }
   }
-  
-  
+
+
   private def initialize(shader: Shader) :Int = {
     if (shader.compilationFailed) return 0
-    
+
     def formatLineNumber(i: Int) :String = {
       if (i < 10) "00" + i.toString
       else if (i < 100) "0" + i.toString
       else if (i >= 1000) (i%1000).toString
       else i.toString
     }
-    
+
     def format(src: String) :String = {
       val res = new StringBuilder
       val lines: Array[String] = src.split("\n")
-      
+
       var i = 0; while (i < lines.length) {
         val line = lines(i)
         res.append(formatLineNumber(i + 1))
         res.append(" |  ")
         res.append(line)
         res.append("\n")
-        
+
         i += 1
       }
-      
+
       res.toString
     }
-    
+
     val id = glCreateShader(shader.shaderType match {
       case Shader.Vertex => GL_VERTEX_SHADER
       case Shader.Fragment => GL_FRAGMENT_SHADER
@@ -532,94 +566,94 @@ extends graphics.RenderContext {
 
     val logLength = glGetShader(id, GL_INFO_LOG_LENGTH)
     val shaderLog = glGetShaderInfoLog(id, logLength)
-    
+
     if (glGetShader(id, GL_COMPILE_STATUS) == 0) {
       log(
         Level.SEVERE,
         "Shader compilation failed with the following errors:\n\n" + shaderLog + "\nSource:\n" + format(shader.src)
       )
-      
+
       glDeleteShader(id)
       shader.compilationFailed = true
       return 0
     }
-    
+
     if (settings.logShaderWarnings && shaderLog.length() > 0) {
       log(
         Level.WARNING,
         "Shader compilation succeeded with some warnings:\n\n" + shaderLog + "\nSource:\n" + format(shader.src)
       )
     }
-    
+
     shader.managedFields.id = id
     resourceManager.register(shader)
     id
   }
-  
-  
+
+
   private[this] val vec3Data = DataBuffer[Vec3, RFloat](1)
   private[this] val vec3Buffer = vec3Data.buffer()
-  
+
   private[this] val vec4Data = DataBuffer[Vec4, RFloat](1)
   private[this] val vec4Buffer = vec4Data.buffer()
-  
+
   private[this] val sizeAndType = DataBuffer[SInt, SInt](2).buffer()
-  
+
   private def initialize(program: Technique) :Int = {
     if (program.compilationFailed) return 0
-    
+
     var progId = glCreateProgram()
     var compilationFailed = false
-    
+
     for (shader <- program.shaders) {
       var shaderId = shader.managedFields.id
       if (shaderId == 0) shaderId = initialize(shader)
-      
+
       if (shaderId != 0) glAttachShader(progId, shaderId)
       else compilationFailed = true
     }
-    
+
     if (compilationFailed) {
       glDeleteProgram(progId)
       program.compilationFailed = true
       return 0
     }
 
-    
+
     glLinkProgram(progId)
-    
+
     if (glGetProgram(progId, GL_LINK_STATUS) == 0) {
       val logInfo = glGetProgramInfoLog(progId, 64*1024)
       log(Level.SEVERE, "The program failed to link:\n" + logInfo)
       glDeleteProgram(progId)
       return 0
     }
-    
-    
+
+
     program.managedFields.id = progId
     resourceManager.register(program)
-    
-    
+
+
     // Query GL for program bindings.
     var uniformBindings = ArrayBuffer[ActiveUniform]()
     val attributeBindings = ArrayBuffer[ActiveAttribute]()
     var textureUnitCount = 0
-    
+
     val geom = program.graphicsContext.mkGeometry()
     val mat = program.graphicsContext.mkMaterial(null)
     val env = program.graphicsContext.mkEnvironment(null)
-    
+
     def belongs(name: String, seq: IndexedSeq[String]) :Boolean = {
       var dotIndex = name.indexOf('.')
       if (dotIndex < 0) dotIndex = name.length
-      
+
       var sbIndex = name.indexOf('[')
       if (sbIndex < 0) sbIndex = name.length
-      
+
       val prefix = name.substring(0, min(dotIndex, sbIndex))
       seq.contains(prefix)
     }
-    
+
     val uniformCount = glGetProgram(progId, GL_ACTIVE_UNIFORMS)
     val uniformStringLength = glGetProgram(progId, GL_ACTIVE_UNIFORM_MAX_LENGTH)
     var i = 0; while (i < uniformCount) {
@@ -628,16 +662,16 @@ extends graphics.RenderContext {
         val path = if (rawPath.endsWith("[0]")) rawPath.dropRight(3) else rawPath
         val size = sizeAndType.get(0)
         val dataType = EngineBindingTypes.fromGlType(sizeAndType.get(1))
-        
+
         if (EngineBindingTypes.isTexture(dataType)) {
-  
+
           if (size > 1) {
             var i = 0; while (i < size) {
               val arrayName = path + "[" + i + "]"
               val location = glGetUniformLocation(progId, arrayName)
               uniformBindings += new ActiveTexture(arrayName, dataType, location, textureUnitCount)
               textureUnitCount += 1
-              
+
               i += 1
             }
           }
@@ -648,13 +682,13 @@ extends graphics.RenderContext {
           }
         }
         else {
-            
+
           if (size > 1) {
             var i = 0; while (i < size) {
               val arrayName = path + "[" + i + "]"
               val location = glGetUniformLocation(progId, arrayName)
               uniformBindings += new ActiveUniform(arrayName, dataType, location)
-              
+
               i += 1
             }
           }
@@ -664,10 +698,10 @@ extends graphics.RenderContext {
           }
         }
       }
-      
+
       i += 1
     }
-    
+
     val attributeCount = glGetProgram(progId, GL_ACTIVE_ATTRIBUTES)
     val attributeStringLength = glGetProgram(progId, GL_ACTIVE_ATTRIBUTE_MAX_LENGTH)
     i = 0; while (i < attributeCount) {
@@ -675,174 +709,180 @@ extends graphics.RenderContext {
       val size = sizeAndType.get(0) // Not used by GL.
       val dataType = EngineBindingTypes.fromGlType(sizeAndType.get(1))
       val location = glGetAttribLocation(progId, name)
-      
+
       val binding = new ActiveAttribute(name, dataType, location)
-      
+
       if (belongs(name, geom.attributeNames)) attributeBindings += binding
-      
+
       i += 1
     }
-    
+
 
     program.mapping = new ProgramMapping(program, this)(uniformBindings, attributeBindings)
-    
+
     progId
   }
-  
+
   def bindProgram(program: Technique) :Boolean = {
     var id = program.managedFields.id
     if (id == 0) id = initialize(program)
-    
+
     if (id != 0) {
       useProgram(id)
       true
     }
     else false
   }
-  
-  
+
+
   // *****************************************************************************************************************
-  
+
   def release(texture: Texture[_]) {
     resourceManager.delete(texture)
     invalidateState = true
   }
-  
+
   def release(attributes: Attributes[_, _]) {
     resourceManager.delete(attributes)
     invalidateState = true
   }
-  
-  
+
+  def release(fbo: FrameBuffer) {
+    resourceManager.delete(fbo)
+    invalidateState = true
+  }
+
+
   def clearFrameBuffer() {
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT | GL_STENCIL_BUFFER_BIT)
   }
-  
+
   def viewportDimensions() :ConstVec2i = {
     // XXX this data must come from bound FrameBuffer (scala object).
     glGetInteger(GL_VIEWPORT, intBuffer)
     ConstVec2i(intBuffer.get(2), intBuffer.get(3))
+    //boundFrameBuffer.dimensions
   }
 
-  
+
   def manage() {
     resourceManager.manage()
   }
-  
+
   def cleanup() {
     resourceManager.cleanup()
   }
-  
-  
+
+
   // *** Util methods ************************************************************************************************
-  
+
   private val intBuffer = DataBuffer[SInt, SInt](16).buffer()
   private val floatBuffer = DataBuffer[RDouble, RFloat](16).buffer()
-  
+
   import simplex3d.math.Accessors._
-  
+
   def mat2x2ToBuffer(m: AnyMat[_]) :FloatBuffer = {
     floatBuffer.limit(4)
-    
+
     floatBuffer.put(f00(m)); floatBuffer.put(f01(m))
     floatBuffer.put(f10(m)); floatBuffer.put(f11(m))
-    
+
     floatBuffer.rewind()
     floatBuffer
   }
-  
+
   def mat2x3ToBuffer(m: AnyMat2x3[_]) :FloatBuffer = {
     floatBuffer.limit(6)
-    
+
     floatBuffer.put(f00(m)); floatBuffer.put(f01(m)); floatBuffer.put(f02(m))
     floatBuffer.put(f10(m)); floatBuffer.put(f11(m)); floatBuffer.put(f12(m))
-    
+
     floatBuffer.rewind()
     floatBuffer
   }
-  
+
   def mat2x4ToBuffer(m: AnyMat2x4[_]) :FloatBuffer = {
     floatBuffer.limit(8)
-    
+
     floatBuffer.put(f00(m)); floatBuffer.put(f01(m)); floatBuffer.put(f02(m)); floatBuffer.put(f03(m))
     floatBuffer.put(f10(m)); floatBuffer.put(f11(m)); floatBuffer.put(f12(m)); floatBuffer.put(f13(m))
-    
+
     floatBuffer.rewind()
     floatBuffer
   }
-  
+
   def mat3x2ToBuffer(m: AnyMat3x2[_]) :FloatBuffer = {
     floatBuffer.limit(6)
-    
+
     floatBuffer.put(f00(m)); floatBuffer.put(f01(m))
     floatBuffer.put(f10(m)); floatBuffer.put(f11(m))
     floatBuffer.put(f20(m)); floatBuffer.put(f21(m))
-    
+
     floatBuffer.rewind()
     floatBuffer
   }
-  
+
   def mat3x3ToBuffer(m: AnyMat[_]) :FloatBuffer = {
     floatBuffer.limit(9)
-    
+
     floatBuffer.put(f00(m)); floatBuffer.put(f01(m)); floatBuffer.put(f02(m))
     floatBuffer.put(f10(m)); floatBuffer.put(f11(m)); floatBuffer.put(f12(m))
     floatBuffer.put(f20(m)); floatBuffer.put(f21(m)); floatBuffer.put(f22(m))
-    
+
     floatBuffer.rewind()
     floatBuffer
   }
-  
+
   def mat3x4ToBuffer(m: AnyMat3x4[_]) :FloatBuffer = {
     floatBuffer.limit(12)
-    
+
     floatBuffer.put(f00(m)); floatBuffer.put(f01(m)); floatBuffer.put(f02(m)); floatBuffer.put(f03(m))
     floatBuffer.put(f10(m)); floatBuffer.put(f11(m)); floatBuffer.put(f12(m)); floatBuffer.put(f13(m))
     floatBuffer.put(f20(m)); floatBuffer.put(f21(m)); floatBuffer.put(f22(m)); floatBuffer.put(f23(m))
-    
+
     floatBuffer.rewind()
     floatBuffer
   }
-  
+
   def mat4x2ToBuffer(m: AnyMat4x2[_]) :FloatBuffer = {
     floatBuffer.limit(8)
-    
+
     floatBuffer.put(f00(m)); floatBuffer.put(f01(m))
     floatBuffer.put(f10(m)); floatBuffer.put(f11(m))
     floatBuffer.put(f20(m)); floatBuffer.put(f21(m))
     floatBuffer.put(f30(m)); floatBuffer.put(f31(m))
-    
+
     floatBuffer.rewind()
     floatBuffer
   }
-  
+
   def mat4x3ToBuffer(m: AnyMat4x3[_]) :FloatBuffer = {
     floatBuffer.limit(12)
-    
+
     floatBuffer.put(f00(m)); floatBuffer.put(f01(m)); floatBuffer.put(f02(m))
     floatBuffer.put(f10(m)); floatBuffer.put(f11(m)); floatBuffer.put(f12(m))
     floatBuffer.put(f20(m)); floatBuffer.put(f21(m)); floatBuffer.put(f22(m))
     floatBuffer.put(f30(m)); floatBuffer.put(f31(m)); floatBuffer.put(f32(m))
-    
+
     floatBuffer.rewind()
     floatBuffer
   }
-  
+
   def mat4x4ToBuffer(m: AnyMat[_]) :FloatBuffer = {
     floatBuffer.limit(16)
-    
+
     floatBuffer.put(f00(m)); floatBuffer.put(f01(m)); floatBuffer.put(f02(m)); floatBuffer.put(f03(m))
     floatBuffer.put(f10(m)); floatBuffer.put(f11(m)); floatBuffer.put(f12(m)); floatBuffer.put(f13(m))
     floatBuffer.put(f20(m)); floatBuffer.put(f21(m)); floatBuffer.put(f22(m)); floatBuffer.put(f23(m))
     floatBuffer.put(f30(m)); floatBuffer.put(f31(m)); floatBuffer.put(f32(m)); floatBuffer.put(f33(m))
-    
+
     floatBuffer.rewind()
     floatBuffer
   }
-  
-  
+
+
   // *** Mesh mapping *************************************************************************************************
-    
+
   private[this] final def resolveUniform(
     meshName: String,
     path: String,
@@ -852,21 +892,21 @@ extends graphics.RenderContext {
     environment: Environment,
     program: Technique
   ) :Binding = {
-    
+
     val binding = program.graphicsContext.resolveUniformPath(
       path, predefined, material, environment, program.programUniforms//XXX possibly better naming for programUniforms, shaderUniforms
     )
-    
+
     if (binding != null) {
       val correctType = checkUniformType(binding, dataType)
-      
+
       if (!correctType) {
-        
+
         val resolved = binding match {
           case tb: ReadTextureBinding[_] => ClassUtil.simpleName(tb.bindingTag.runtimeClass)
           case _ => ClassUtil.simpleName(binding.getClass)
         }
-        
+
         log(
           Level.SEVERE, "Uniform '" + path +
           "' is defined as '" + EngineBindingTypes.toString(dataType) +
@@ -876,7 +916,7 @@ extends graphics.RenderContext {
         return null
       }
     }
-    
+
     if (binding == null && !path.endsWith("nvidia_drivers_are_very_buggy")) log(
       Level.SEVERE, "Uniform '" + path + "' could not be resolved for mesh '" + meshName + "'.")
 
@@ -886,10 +926,10 @@ extends graphics.RenderContext {
         Level.SEVERE, "Texture '" + path + "' is not defined for mesh '" +
         meshName + "'. Default texture will be used.")
     }
-    
+
     binding.asInstanceOf[Binding]
   }
-  
+
   private[this] def checkAttributeType(m: ClassTag[_], dtype: Int) :Boolean = {
      dtype match {
       case EngineBindingTypes.Float => m == PrimitiveFormat.RFloat || m == PrimitiveFormat.RDouble
@@ -912,7 +952,7 @@ extends graphics.RenderContext {
       case _ => false
     }
   }
-  
+
   private[this] def checkUniformType(binding: AnyRef, dtype: Int) :Boolean = {
     dtype match {
       case EngineBindingTypes.Float => binding.isInstanceOf[ReadDoubleRef]
@@ -940,7 +980,7 @@ extends graphics.RenderContext {
         binding.isInstanceOf[ReadMat2x4] || binding.isInstanceOf[ReadMat4x2] ||
         binding.isInstanceOf[ReadMat3x4] || binding.isInstanceOf[ReadMat4x3] || binding.isInstanceOf[ReadMat4x4]
       case EngineBindingTypes.Texture1d => false// XXX
-      
+
       /* Replace when 2.10 is out
       case EngineBindingTypes.Texture2d => binding match {
           case tb: ReadTextureBinding[_] => Texture2d.Tag.runtimeClass.isAssignableFrom(tb.bindingTag.runtimeClass)
@@ -952,7 +992,7 @@ extends graphics.RenderContext {
           Texture2d.Tag.runtimeClass.isAssignableFrom(erasure)
         case _ => false
       }
-      
+
       case EngineBindingTypes.Texture3d => false
       case EngineBindingTypes.CubeTexture => false
       case EngineBindingTypes.ShadowTexture1d => false
@@ -960,83 +1000,83 @@ extends graphics.RenderContext {
       case _ => false
     }
   }
-  
+
   //XXX this algorithm should be in backend.opengl package
   private[this] final def buildUniformMapping(
     programBindings: ReadArray[ActiveUniform],
     predefined: PredefinedUniforms,
     mesh: AbstractMesh
   ) :ReadArray[Binding] = {
-    
+
     val program = mesh.technique.get
     val uniformMapping = new Array[Binding](programBindings.length)
-    
+
     val graphicsContext = mesh.technique.get.graphicsContext
     val textureRemapping = graphicsContext.samplerRemapping(mesh.material, mesh.worldEnvironment)
-    
+
     def remap(path: String) :String = {
-      
+
       def arrayRemapping(name: String, index: String) :String = {
         val res = textureRemapping.get(name + "[*]")
         if (res != null) res.replace("[*]", "[" + index + "]")
         else path
       }
-      
+
       path match {
-        
+
         case PathUtil.NameIndex(name, index) =>
           arrayRemapping(name, index)
-        
+
         case name =>
           var res = textureRemapping.get(name)
           if (res != null) res
           else arrayRemapping(name, "0")
       }
     }
-    
+
     var i = 0; while (i < programBindings.length) {
       val programBinding = programBindings(i)
       val pref = "se_dimsOf_"
-      
+
       val path = programBinding match {
         case tex: ActiveTexture => remap(programBinding.name)
         case binding if binding.name.startsWith(pref) => remap(programBinding.name.drop(pref.length)) + ".dimensions"
         case _ => programBinding.name
       }
-      
+
       uniformMapping(i) = resolveUniform(
         mesh.name, path, programBinding.dataType,
         predefined, mesh.material, mesh.worldEnvironment, program
       )
-      
+
       i += 1
     }
-    
+
     new ReadArray(uniformMapping)
   }
-  
-  
+
+
   private[this] final def buildAttributeMapping(mesh: AbstractMesh, programBindings: ReadArray[ActiveAttribute])
   :ReadArray[Attributes[_, _]] = {
-    
+
     val mapping = new Array[Attributes[_, _]](programBindings.length)
     val geom = mesh.geometry
     val graphicsContext = mesh.technique.get.graphicsContext
-    
+
     var i = 0; while (i < programBindings.length) {
       val programBinding = programBindings(i)
       val attrib = graphicsContext.resolveAttributePath(programBinding.name, geom)
-      
+
       if (attrib == null) log(
         Level.SEVERE,
         "Attributes '" + programBinding.name + "' cannot be resolved for mesh '" + mesh.name + "'."
       )
       else {
         val correctType = checkAttributeType(attrib.src.accessorTag, programBinding.dataType)
-        
+
         if (!correctType) {
           val resolved = ClassUtil.simpleName(attrib.src.accessorTag.runtimeClass)
-              
+
           log(
             Level.SEVERE, "Attributes '" + programBinding.name +
             "' are defined as a sequence of '" + EngineBindingTypes.toString(programBinding.dataType) +
@@ -1048,14 +1088,14 @@ extends graphics.RenderContext {
           mapping(i) = attrib.asInstanceOf[Attributes[_, _]]
         }
       }
-      
+
       i += 1
     }
-    
+
     new ReadArray(mapping)
   }
-  
-  
+
+
   final def rebuildMeshMapping(
     mesh: AbstractMesh,
     programMapping: simplex3d.backend.opengl.ProgramMapping
@@ -1063,17 +1103,150 @@ extends graphics.RenderContext {
     val uniformVectors = buildUniformMapping(
       programMapping.uniformVectors, predefinedUniforms, mesh
     ).asInstanceOf[ReadArray[VectorLike]]
-    
+
     val uniformMatrices = buildUniformMapping(
       programMapping.uniformMatrices, predefinedUniforms, mesh
     ).asInstanceOf[ReadArray[AnyMat[_]]]
-    
+
     val uniformTextures = buildUniformMapping(
       programMapping.uniformTextures, predefinedUniforms, mesh
     ).asInstanceOf[ReadArray[ReadTextureBinding[_]]]
-    
+
     val attributes = buildAttributeMapping(mesh, programMapping.attributes)
-    
+
     mesh.mapping = new MeshMapping(uniformVectors, uniformMatrices, uniformTextures, attributes)
+  }
+
+  private def runFrameBufferCheck(fbo : FrameBuffer) {
+    val framebuffer = EXTFramebufferObject.glCheckFramebufferStatusEXT( EXTFramebufferObject.GL_FRAMEBUFFER_EXT );
+    ( framebuffer ) match {
+      case EXTFramebufferObject.GL_FRAMEBUFFER_COMPLETE_EXT => {}
+      case EXTFramebufferObject.GL_FRAMEBUFFER_INCOMPLETE_ATTACHMENT_EXT => {
+          throw new RuntimeException( "FrameBuffer: " + fbo.managedFields.id
+                                       + ", has caused a GL_FRAMEBUFFER_INCOMPLETE_ATTACHMENT_EXT exception" );
+      }
+      case EXTFramebufferObject.GL_FRAMEBUFFER_INCOMPLETE_MISSING_ATTACHMENT_EXT => {
+          throw new RuntimeException( "FrameBuffer: " + fbo.managedFields.id
+                                       + ", has caused a GL_FRAMEBUFFER_INCOMPLETE_MISSING_ATTACHMENT_EXT exception" );
+      }
+      case EXTFramebufferObject.GL_FRAMEBUFFER_INCOMPLETE_DIMENSIONS_EXT => {
+          throw new RuntimeException( "FrameBuffer: " + fbo.managedFields.id
+                                       + ", has caused a GL_FRAMEBUFFER_INCOMPLETE_DIMENSIONS_EXT exception" );
+      }
+      case EXTFramebufferObject.GL_FRAMEBUFFER_INCOMPLETE_DRAW_BUFFER_EXT => {
+          throw new RuntimeException( "FrameBuffer: " + fbo.managedFields.id
+                                       + ", has caused a GL_FRAMEBUFFER_INCOMPLETE_DRAW_BUFFER_EXT exception" );
+      }
+      case EXTFramebufferObject.GL_FRAMEBUFFER_INCOMPLETE_FORMATS_EXT => {
+          throw new RuntimeException( "FrameBuffer: " + fbo.managedFields.id
+                                       + ", has caused a GL_FRAMEBUFFER_INCOMPLETE_FORMATS_EXT exception" );
+      }
+      case EXTFramebufferObject.GL_FRAMEBUFFER_INCOMPLETE_READ_BUFFER_EXT => {
+          throw new RuntimeException( "FrameBuffer: " + fbo.managedFields.id
+                                       + ", has caused a GL_FRAMEBUFFER_INCOMPLETE_READ_BUFFER_EXT exception" );
+      }
+      case other => {
+        throw new RuntimeException( "Unexpected reply from glCheckFramebufferStatusEXT: " + framebuffer );
+      }
+    }
+  }
+
+  private def initUpdateFrameBufferAttachments(fbo : FrameBuffer) {
+    if(!fbo.hasAttachmentChanges)
+      return
+    // bind the fbo
+    EXTFramebufferObject.glBindFramebufferEXT( EXTFramebufferObject.GL_FRAMEBUFFER_EXT, fbo.managedFields.id )
+
+    var hasColor = false
+    val textures = List(fbo.colorAttachment, fbo.depthAttachment, fbo.stencilAttachment)
+    for(texIndex <- 0 to 2) {
+      val tex = textures(texIndex)
+      tex match {
+        case Some(t) => {
+          // init the texture if not yet done
+          if(t.managedFields.id == 0) init(t)
+
+          // attach texture to the fbo
+          val attachmentPoint = texIndex match {
+            case 0 => { hasColor = true; EXTFramebufferObject.GL_COLOR_ATTACHMENT0_EXT }
+            case 1 => EXTFramebufferObject.GL_DEPTH_ATTACHMENT_EXT
+            case 2 => EXTFramebufferObject.GL_STENCIL_ATTACHMENT_EXT
+          }
+          log(Level.INFO, "  attaching texture " + t + " to fbo " + fbo + "(texture id: " + t.managedFields.id + ")")
+          EXTFramebufferObject.glFramebufferTexture2DEXT( EXTFramebufferObject.GL_FRAMEBUFFER_EXT, attachmentPoint,
+                                                          GL11.GL_TEXTURE_2D, t.managedFields.id, 0);
+        }
+        case None => {
+
+        }
+      }
+    }
+    // If you are only rendering to depth and/or stencil, you must set
+    // the draw and read buffers to GL_NONE, otherwise, the FBO isn't
+    // complete and a RuntimeException will be thrown in the
+    // completeness check:
+    if(!hasColor) {
+      GL11.glDrawBuffer(GL11.GL_NONE);
+      GL11.glReadBuffer(GL11.GL_NONE);
+    }
+
+    runFrameBufferCheck(fbo)
+    fbo.clearAttachmentChanges()
+  }
+
+  private def initialize(fbo: FrameBuffer) :Int = {
+    log(Level.INFO, "Initializing FBO " + fbo)
+    // init the fbo
+    var buffer = ByteBuffer.allocateDirect(1*4).order(ByteOrder.nativeOrder()).asIntBuffer() // allocate a 1 int byte buffer
+    EXTFramebufferObject.glGenFramebuffersEXT( buffer ) // generate
+    var FBOId = buffer.get()
+    fbo.managedFields.id = FBOId
+    resourceManager.register(fbo)
+
+    // init the attachments and attach them to the fbo
+    initUpdateFrameBufferAttachments(fbo)
+
+    FBOId
+  }
+
+  private def initUpdateFrameBuffer(fbo: FrameBuffer) :Int = {
+    var id = fbo.managedFields.id
+    if (id == 0) id = initialize(fbo)
+
+    id
+  }
+
+  def init(fbo: FrameBuffer) {
+    assert(GLContext.getCapabilities().GL_EXT_framebuffer_object)
+    initUpdateFrameBuffer(fbo)
+  }
+
+  var boundFrameBuffer = DefaultFrameBuffer.instance
+
+  def bindFrameBuffer(fbo: FrameBuffer) {
+    if(fbo.managedFields.id == 0 && fbo != DefaultFrameBuffer.instance) init(fbo)
+    if(fbo.hasAttachmentChanges && fbo != DefaultFrameBuffer.instance) initUpdateFrameBufferAttachments(fbo)
+    boundFrameBuffer = fbo
+    // bind fbo
+    // do we need to do this?
+    // if(fbo.colorAttachment != None && fbo.depthAttachment == None) {
+    //     GL11.glDisable(GL_DEPTH_TEST)
+    //     GL11.glDepthMask(false)
+    // }
+
+    // absolutely make sure to unbind any textures, otherwise strange
+    // things start to happen on nv hardware! (This line cost me two days debugging...)
+    GL11.glBindTexture(GL_TEXTURE_2D, 0)
+    // then bind the fbo
+    EXTFramebufferObject.glBindFramebufferEXT( EXTFramebufferObject.GL_FRAMEBUFFER_EXT, fbo.managedFields.id );
+
+    // make sure to set viewport
+    GL11.glPushAttrib(GL11.GL_VIEWPORT_BIT);
+    GL11.glViewport( 0, 0, fbo.dimensions.x, fbo.dimensions.y );
+  }
+  def unbindFrameBuffer(fbo: FrameBuffer) {
+    GL11.glPopAttrib();
+    EXTFramebufferObject.glBindFramebufferEXT( EXTFramebufferObject.GL_FRAMEBUFFER_EXT, 0);
+    boundFrameBuffer = DefaultFrameBuffer.instance
   }
 }

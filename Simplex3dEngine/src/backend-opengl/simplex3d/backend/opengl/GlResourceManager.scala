@@ -26,46 +26,72 @@ import scala.ref._
 import simplex3d.engine.graphics._
 import simplex3d.backend.opengl.api._
 
-
+/** The GlResourceManager class manages the internal GPU memory,
+  * by creating a mapping between java objects and GPU memory.
+  * If the java object is being gc'ed, then the GPU memory will be
+  * freed as well.
+  *
+  * A mapping can be created either using the allocate method, or
+  * using the register method. The allocate method uses an IdManager
+  * instance, to both create (allocate) storage and delete it.  The
+  * register method does not allocate any data, but assumes data to be
+  * already allocated, as such all that is necessary, is a
+  * deallocation implementation, that should be passed to the
+  * GlResourceManager instance.
+  *
+  * @param attributeManager A IdManager instance that can generate new ids.
+  * @param textureManager A IdManager instance that can generate new ids.
+  * @param fboDeallocator A fn taking an internal (OpenGL) id that clears memory assoc. with it.
+  * @param shaderDeallocator like fboDeallocator, but for shaders.
+  * @param programDeallocator like fboDeallocator, but for shader programs.
+  */
 final class GlResourceManager(
   val attributeManager: IdManager,
   val textureManager: IdManager,
+  val fboDeallocator: Int => Unit,
   val shaderDeallocator: Int => Unit,
   val programDeallocator: Int => Unit
 ) {
-  
+
   private val managed = new HashSet[ManagedRef]
   private val deallocationQueue = new ReferenceQueue[ObjectInfo]
-  
-  
+
+  /** Allocate the necessary GPU storage for the object and link the
+    * lifetime of that newly created memory, with the lifetime of the
+    * passed-in object.
+    */
   def allocate(attributes: Attributes[_, _]) { allocate(attributeManager, engineInfo(attributes)) }
   def allocate(texture: Texture[_]) { allocate(textureManager, engineInfo(texture)) }
-  
+
   private def allocate(idManager: IdManager, info: ObjectInfo) {
     val fields = info.managedFields
-    
+
     if (fields.id == 0) {
       fields.id = idManager.nextId()
       info.managedRef = new ManagedRef(info, deallocationQueue, fields)
       managed.add(info.managedRef)
     }
   }
-  
+
   def register(shader: Shader) { register(engineInfo(shader)) }
   def register(program: Technique) { register(engineInfo(program)) }
-  
+  def register(fbo: FrameBuffer) { register(engineInfo(fbo)) }
+
   private def register(info: ObjectInfo) {
     val fields = info.managedFields
-    
+
     if (fields.id != 0) {
       info.managedRef = new ManagedRef(info, deallocationQueue, fields)
       managed.add(info.managedRef)
     }
   }
-  
+
+  /** Deletes (i.e. frees) the GPU memory associated with the
+    * objectInfo instance.
+    */
   def delete(info: ObjectInfo) {
     val fields = info.managedFields
-    
+
     if (fields.id != 0) {
       deleteId(fields)
 
@@ -74,33 +100,37 @@ final class GlResourceManager(
       info.managedRef = null
     }
   }
-  
+
   private[this] def deleteId(fields: ManagedFields) {
     (fields.objectType: @switch) match {
       case ManagedObjects.Attributes => attributeManager.release(fields.id)
       case ManagedObjects.Texture => textureManager.release(fields.id)
       case ManagedObjects.Shader => shaderDeallocator.apply(fields.id)
       case ManagedObjects.Program => programDeallocator.apply(fields.id)
+      case ManagedObjects.FrameBuffer => fboDeallocator.apply(fields.id)
     }
 
     fields.id = 0
   }
-  
+
+  /** Polls the deallocationQueue for object that have been collected
+    * by the gc and deletes the GPU memory associated with the object.
+    */
   def manage() {
     var last = deallocationQueue.poll; while (last.isDefined) {
       val ref = last.get.asInstanceOf[ManagedRef]
-      
+
       if (ref.fields.id != 0) deleteId(ref.fields)
       managed.remove(ref)
       ref.clear()
-      
+
       last = deallocationQueue.poll
     }
-    
+
     attributeManager.releasePending()
     textureManager.releasePending()
   }
-  
+
   def cleanup() {
     for (ref <- managed) {
       if (ref.fields.id != 0) deleteId(ref.fields)

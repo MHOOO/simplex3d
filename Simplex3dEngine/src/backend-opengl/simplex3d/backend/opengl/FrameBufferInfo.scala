@@ -20,11 +20,8 @@
 
 package simplex3d.backend.opengl
 
+import simplex3d.engine.graphics._
 
-object ManagedObjects {
-  final val Attributes = 0
-  final val Texture = 1
-  final val Shader = 2
-  final val Program = 3
-  final val FrameBuffer = 4
+class FrameBufferInfo extends ObjectInfo(ManagedObjects.FrameBuffer) {
 }
+

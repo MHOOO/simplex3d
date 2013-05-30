@@ -21,14 +21,10 @@
 package simplex3d.engine
 package graphics
 
-import org.lwjgl.opengl._
 import util._
 
 import java.nio._
 
-import simplex3d.backend.opengl._
-import simplex3d.backend.lwjgl._
-import simplex3d.backend.lwjgl.ArbEquivalents.{ GL15 ,GL20 }
 import simplex3d.math._
 
 object FBOAttachmentPoint extends Enumeration {
@@ -37,9 +33,6 @@ object FBOAttachmentPoint extends Enumeration {
 }
 
 class FrameBuffer(val dimensions: ConstVec2i) extends EngineInfoRef {
-  import GL11._; import GL12._; import GL13._; import GL14._; import GL15._
-  import GL20._; import EXTTextureFilterAnisotropic._; import EXTFramebufferObject._
-
   private var attachmentChanges = true
 
   var colorAttachment : Option [Texture2d [_ <: simplex3d.data.Accessor]] = None
